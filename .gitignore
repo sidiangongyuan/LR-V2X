@@ -1,0 +1,82 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test & tooling caches
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.pyre/
+.cache/
+.coverage
+htmlcov/
+
+# Misc
+.ipynb_checkpoints/
+.DS_Store
+
+# Training outputs
+logs/
+runs/
+exp_vis/
+
+# Paper & writing
+writing/
+
+# Internal planning & notes
+ABLATION_TODO.md
+DIFFV2X_*.md
+EGO_CONDITION_CHANGES.md
+HETERO_COLLAB_PERCEPTION_SOTA.md
+LATENT_PRIOR_IMPROVEMENT.md
+Temporal_loss.md
+review.md
+memory.md
+train_20251114_125003.log
+
+# Temp files
+pymp-*/
+
+# IDE / tools
+.vscode/
+.codex
+.codex-skill-staging/
+
+# Ablation model variants (not main model)
+opencood/models/diffv2x_pyramid_nonoise*.py
+opencood/models/diffv2x_pyramid_plain_diffusion*.py
+
+# Ablation configs
+opencood/hypes_yaml/**/DiffV2X_Stages/*nonoise*.yaml
+opencood/hypes_yaml/**/DiffV2X_Stages/*plain_diffusion*.yaml
+opencood/hypes_yaml/**/DiffV2X_Stages/*zero_prior*.yaml
+
+# Visualization & profiling scripts
+scripts/
+pcd_vis.py
+test_different_timesteps.py
+opencood/visualization/
+opencood/tools/profiler/
+opencood/tools/build_trt*.py
+opencood/tools/onnx_export_utils.py
+opencood/tools/inference_onnx_dump_calibration.py
+opencood/tools/inference_vis.py
+opencood/tools/visualize_distribution_shift.py
+opencood/tools/pose_graph_evaluate.py
+opencood/tools/pose_graph_pre_calc.py
+opencood/tools/test_modular_diffusion.py
+
+# Quantization tools
+opencood/quant/
+opencood/tools/inference_quant.py
+opencood/tools/inference_mc_quant.py
+opencood/tools/build_trt.py
+opencood/tools/build_trt_fp32.py
+opencood/tools/build_trt_int8.py
