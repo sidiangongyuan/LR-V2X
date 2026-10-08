@@ -8,7 +8,7 @@ Integrates:
 
 Training stages:
 - Stage 2: Train diffusion only (freeze pyramid fusion)
-- Stage 3: End-to-end fine-tuning (train all)
+- Stage 3: Fine-tune reconstruction, fusion, and heads with a frozen sensor backbone
 """
 
 import os
@@ -32,6 +32,7 @@ from opencood.models.sub_modules.diffusion_sampler import (
 from opencood.models.sub_modules.simple_prior_decoder import SimplePriorDecoder
 from opencood.utils.transformation_utils import normalize_pairwise_tfm
 from opencood.utils.model_utils import check_trainable_module
+from opencood.utils.packet_loss_utils import build_spatial_packet_loss_mask
 from opencood.models.sub_modules.torch_transformation_utils import warp_affine_simple
 
 
@@ -300,6 +301,17 @@ class DiffV2XPyramidMC(nn.Module):
             )
 
             self.compression_ratio = diffusion_args.get('compression_ratio', 1.0)
+            self.packet_loss_mode = diffusion_args.get(
+                'packet_loss_mode', 'bernoulli'
+            )
+            self.burst_coarse_h = int(diffusion_args.get('burst_coarse_h', 8))
+            self.burst_coarse_w = int(diffusion_args.get('burst_coarse_w', 16))
+            self.temporal_block_len = int(
+                diffusion_args.get('temporal_block_len', 1)
+            )
+            self.packet_loss_seed_base = diffusion_args.get(
+                'packet_loss_seed_base'
+            )
 
             print(f"[DiffV2X] Diffusion module initialized:")
             print(f"  - Model: {use_mode}")
@@ -435,11 +447,19 @@ class DiffV2XPyramidMC(nn.Module):
 
             # Apply compression (simulate communication constraint)
             if self.compression_ratio < 1.0:
-                # Spatial-level mask: entire spatial location is either received or lost
-                # Shape: [num_agents, 1, H, W] instead of [num_agents, C, H, W]
-                # This simulates packet loss where a packet contains all channels at one location
-                N, C, H, W = agent_latents.shape
-                mask = (torch.rand(N, 1, H, W, device=agent_latents.device) < self.compression_ratio).float()
+                _, _, H, W = agent_latents.shape
+                mask = build_spatial_packet_loss_mask(
+                    record_len=record_len,
+                    spatial_size=(H, W),
+                    keep_ratio=self.compression_ratio,
+                    device=agent_latents.device,
+                    dtype=agent_latents.dtype,
+                    mode=self.packet_loss_mode,
+                    burst_coarse_shape=(self.burst_coarse_h, self.burst_coarse_w),
+                    temporal_block_len=self.temporal_block_len,
+                    sample_indices=data_dict.get('sample_idx'),
+                    seed_base=self.packet_loss_seed_base,
+                )
                 agent_latents_compressed = agent_latents * mask
             else:
                 agent_latents_compressed = agent_latents

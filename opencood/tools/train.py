@@ -4,6 +4,7 @@
 
 import argparse
 import os
+import yaml
 import sys
 import random
 import statistics
@@ -14,7 +15,6 @@ from torch.utils.data import DataLoader, Subset
 from tensorboardX import SummaryWriter
 
 # Allow running this file directly without installing the package (e.g., without `pip install -e .`).
-# Keep consistent with `opencood/tools/inference_pkloss_mc.py`.
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
@@ -36,9 +36,9 @@ def seed_all(seed=42):
     torch.backends.cudnn.deterministic = True
 
 def train_parser():
-    parser = argparse.ArgumentParser(description="synthetic data generation")
+    parser = argparse.ArgumentParser(description="Train a LiDAR collaborative detection baseline")
     parser.add_argument("--hypes_yaml", "-y", type=str, required=True,
-                        help='data generation yaml file needed ')
+                        help='Training YAML configuration')
     parser.add_argument('--model_dir', default='',
                         help='Continued training path')
     parser.add_argument('--resume_from', type=str, default='',
@@ -83,8 +83,6 @@ def main():
     print('Creating Model')
     model = train_utils.create_model(hypes)
 
-    print(model.get_memory_footprint())
-    # exit()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # record lowest validation loss checkpoint.
@@ -113,6 +111,7 @@ def main():
     # if we want to train from last checkpoint.
     if opt.model_dir:
         saved_path = opt.model_dir
+        os.makedirs(saved_path, exist_ok=True)
         init_epoch, model = train_utils.load_saved_model(saved_path, model)
         lowest_val_epoch = init_epoch
         scheduler = train_utils.setup_lr_schedular(hypes, optimizer, init_epoch=init_epoch)
@@ -124,6 +123,9 @@ def main():
         # to save the model,
         saved_path = train_utils.setup_train(hypes)
         scheduler = train_utils.setup_lr_schedular(hypes, optimizer)
+
+    with open(os.path.join(saved_path, 'config.yaml'), 'w') as stream:
+        yaml.dump(hypes, stream)
 
     # we assume gpu is necessary
     if torch.cuda.is_available():

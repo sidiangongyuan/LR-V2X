@@ -38,6 +38,12 @@ class HeterPyramidCollabCodebook(HeterPyramidCollab):
             )
             self.burst_coarse_h = int(args['codebook'].get('burst_coarse_h', args.get('burst_coarse_h', 8)))
             self.burst_coarse_w = int(args['codebook'].get('burst_coarse_w', args.get('burst_coarse_w', 16)))
+            self.temporal_block_len = int(
+                args['codebook'].get(
+                    'temporal_block_len',
+                    args.get('temporal_block_len', 1),
+                )
+            )
             self.packet_loss_seed_base = args['codebook'].get(
                 'packet_loss_seed_base',
                 args.get('packet_loss_seed_base', None),
@@ -49,6 +55,7 @@ class HeterPyramidCollabCodebook(HeterPyramidCollab):
             self.packet_loss_mode = args.get('packet_loss_mode', 'bernoulli')
             self.burst_coarse_h = int(args.get('burst_coarse_h', 8))
             self.burst_coarse_w = int(args.get('burst_coarse_w', 16))
+            self.temporal_block_len = int(args.get('temporal_block_len', 1))
             self.packet_loss_seed_base = args.get('packet_loss_seed_base', None)
 
         self.p_rate = 0.0  # typically 0.0 - don't inject noise
@@ -74,6 +81,8 @@ class HeterPyramidCollabCodebook(HeterPyramidCollab):
             print(f"[Codebook] Packet loss mode: {self.packet_loss_mode}")
             if self.packet_loss_mode == 'burst':
                 print(f"[Codebook] Burst coarse shape: ({self.burst_coarse_h}, {self.burst_coarse_w})")
+            if self.packet_loss_mode == 'temporal_block':
+                print(f"[Codebook] Temporal block length: {self.temporal_block_len}")
             if self.packet_loss_seed_base is not None:
                 print(f"[Codebook] Packet loss seed base: {self.packet_loss_seed_base}")
         else:
@@ -196,6 +205,7 @@ class HeterPyramidCollabCodebook(HeterPyramidCollab):
                 dtype=quantized.dtype,
                 mode=self.packet_loss_mode,
                 burst_coarse_shape=(self.burst_coarse_h, self.burst_coarse_w),
+                temporal_block_len=self.temporal_block_len,
                 sample_indices=data_dict.get('sample_idx'),
                 seed_base=self.packet_loss_seed_base,
             )

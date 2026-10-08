@@ -1,26 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-DiffV2X Stage 3: End-to-End Fine-tuning
-
-Co-train diffusion + detection (all modules trainable).
-Load pretrained Stage 2 model and fine-tune all modules end-to-end.
-
-Usage:
-    # Single GPU
-    python opencood/tools/diffv2x_stages/train_diffv2x_stage3.py \\
-        --hypes_yaml opencood/hypes_yaml/v2x_real/DiffV2X_Stages/diffv2x_stage3_finetune.yaml \\
-        --stage2_model logs/diffv2x_stage2/net_epoch_bestval_at25.pth \\
-        --model_dir logs/diffv2x_stage3
-
-    # Multi-GPU (4 GPUs)
-    CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch \\
-        --nproc_per_node=4 \\
-        --use_env \\
-        opencood/tools/diffv2x_stages/train_diffv2x_stage3.py \\
-        --hypes_yaml opencood/hypes_yaml/v2x_real/DiffV2X_Stages/diffv2x_stage3_finetune.yaml \\
-        --stage2_model logs/diffv2x_stage2/net_epoch_bestval_at25.pth \\
-        --model_dir logs/diffv2x_stage3
-"""
+"""Fine-tune reconstruction, fusion, and heads with a frozen sensor backbone (stage 3)."""
 
 import argparse
 import os

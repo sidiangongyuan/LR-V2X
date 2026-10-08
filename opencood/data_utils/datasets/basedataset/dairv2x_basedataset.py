@@ -23,6 +23,10 @@ from opencood.utils.transformation_utils import veh_side_rot_and_trans_to_trasnf
 from opencood.utils.transformation_utils import inf_side_rot_and_trans_to_trasnformation_matrix
 from opencood.data_utils.pre_processor import build_preprocessor
 from opencood.data_utils.post_processor import build_postprocessor
+from opencood.utils.packet_loss_utils import (
+    contiguous_numeric_sequence_ends,
+    grouped_sequence_ends,
+)
 
 class DAIRV2XBaseDataset(Dataset):
     def __init__(self, params, visualize, train=True, calibrate=False):
@@ -70,6 +74,46 @@ class DAIRV2XBaseDataset(Dataset):
         self.root_dir = params['data_dir']
 
         self.split_info = read_json(split_dir)
+        vehicle_datainfo = read_json(
+            os.path.join(self.root_dir, 'vehicle-side/data_info.json')
+        )
+        vehicle_sequence_info = {}
+        for frame_info in vehicle_datainfo:
+            frame_id = os.path.basename(frame_info['pointcloud_path']).replace('.pcd', '')
+            vehicle_sequence_info[frame_id] = (
+                str(frame_info['batch_id']),
+                int(frame_info['pointcloud_timestamp']),
+            )
+
+        missing_sequence_ids = [
+            frame_id
+            for frame_id in self.split_info
+            if frame_id not in vehicle_sequence_info
+        ]
+        if missing_sequence_ids:
+            self.len_record = contiguous_numeric_sequence_ends(self.split_info)
+            self.temporal_sequence_source = 'numeric_frame_id_fallback'
+        else:
+            sequence_ids = [
+                vehicle_sequence_info[frame_id][0]
+                for frame_id in self.split_info
+            ]
+            timestamps = [
+                vehicle_sequence_info[frame_id][1]
+                for frame_id in self.split_info
+            ]
+            for index in range(1, len(self.split_info)):
+                if (
+                    sequence_ids[index] == sequence_ids[index - 1]
+                    and timestamps[index] <= timestamps[index - 1]
+                ):
+                    raise ValueError(
+                        'DAIR split is not timestamp-ordered within batch '
+                        f'{sequence_ids[index]} at indices {index - 1}/{index}.'
+                    )
+            self.len_record = grouped_sequence_ends(sequence_ids)
+            self.temporal_sequence_source = 'vehicle_batch_id'
+
         co_datainfo = read_json(os.path.join(self.root_dir, 'cooperative/data_info.json'))
         self.co_data = OrderedDict()
         for frame_info in co_datainfo:

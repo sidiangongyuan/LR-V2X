@@ -1,24 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-DiffV2X Stage 1: Baseline Pyramid Fusion Training
-
-Train baseline pyramid fusion model (NO diffusion).
-Same as codebook stage1: encoder + backbone + pyramid fusion + detection heads.
-
-Usage:
-    # Single GPU
-    python opencood/tools/diffv2x_stages/train_diffv2x_stage1.py \\
-        --hypes_yaml opencood/hypes_yaml/v2x_real/DiffV2X_Stages/diffv2x_stage1_pyramid.yaml \\
-        --model_dir logs/diffv2x_stage1
-
-    # Multi-GPU (4 GPUs)
-    CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch \\
-        --nproc_per_node=4 \\
-        --use_env \\
-        opencood/tools/diffv2x_stages/train_diffv2x_stage1.py \\
-        --hypes_yaml opencood/hypes_yaml/v2x_real/DiffV2X_Stages/diffv2x_stage1_pyramid.yaml \\
-        --model_dir logs/diffv2x_stage1
-"""
+"""Train the PointPillars detector and pyramid fusion (LR-V2X stage 1)."""
 
 import argparse
 import os

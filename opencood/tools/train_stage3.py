@@ -1,9 +1,10 @@
-#need to save config.yaml manually right now, add that
 
 import shutil
 from datetime import datetime
 import argparse
 import os
+import re
+import yaml
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -26,13 +27,15 @@ def train_parser():
     return parser.parse_args()
 
 
-def find_latest_checkpoint(model_dir):
-    ckpts = [f for f in os.listdir(model_dir) if f.startswith("finetune_epoch") and f.endswith(".pth")]
-    if not ckpts:
+def find_latest_checkpoint(model_dir: str):
+    checkpoints = []
+    for filename in os.listdir(model_dir):
+        match = re.fullmatch(r'net_epoch(\d+)\.pth', filename)
+        if match:
+            checkpoints.append((int(match.group(1)), filename))
+    if not checkpoints:
         return None, 0
-    ckpts.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]))
-    latest = ckpts[-1]
-    epoch = int(latest.split('_')[-1].split('.')[0])
+    epoch, latest = max(checkpoints)
     return os.path.join(model_dir, latest), epoch
 
 
@@ -103,6 +106,8 @@ def main():
 
 
 
+    with open(os.path.join(model_dir, 'config.yaml'), 'w') as stream:
+        yaml.dump(hypes, stream)
     writer = SummaryWriter(model_dir)
     num_epochs = hypes['train_params'].get('epoches', 20)
 

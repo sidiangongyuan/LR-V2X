@@ -1,0 +1,38 @@
+cff-version: 1.2.0
+message: "Please cite our NeurIPS 2026 paper if you use LR-V2X."
+title: "LR-V2X: Loss-Resilient Collaborative Perception under Low-Bandwidth Communication"
+type: software
+authors:
+  - family-names: Yang
+    given-names: Kang
+    affiliation: Renmin University of China
+  - family-names: Bu
+    given-names: Tianci
+    affiliation: The Hong Kong University of Science and Technology
+  - family-names: Wang
+    given-names: Peng
+    affiliation: Renmin University of China
+  - family-names: Li
+    given-names: Deying
+    affiliation: Renmin University of China
+  - family-names: Wang
+    given-names: Yongcai
+    affiliation: Renmin University of China; Hebei Key Laboratory of Real-virtual Integrated Autonomous Systems (RIAS)
+    email: ycw@ruc.edu.cn
+repository-code: https://github.com/sidiangongyuan/LR-V2X
+preferred-citation:
+  type: conference-paper
+  title: "LR-V2X: Loss-Resilient Collaborative Perception under Low-Bandwidth Communication"
+  authors:
+    - family-names: Yang
+      given-names: Kang
+    - family-names: Bu
+      given-names: Tianci
+    - family-names: Wang
+      given-names: Peng
+    - family-names: Li
+      given-names: Deying
+    - family-names: Wang
+      given-names: Yongcai
+  collection-title: Advances in Neural Information Processing Systems
+  year: 2026

@@ -2,27 +2,19 @@
 # Author: Seth Z. Zhao <sethzhao506@g.ucla.edu>
 # License: Academic Software License: © 2021 UCLA Mobility Lab (“Institution”).
 
-from os.path import dirname, realpath
-from setuptools import setup, find_packages, Distribution
+from setuptools import setup, find_packages
 from opencood.version import __version__
 
 
-def _read_requirements_file():
-    """Return the elements in requirements.txt."""
-    req_file_path = '%s/requirements.txt' % dirname(realpath(__file__))
-    with open(req_file_path) as f:
-        return [line.strip() for line in f]
-
-
 setup(
-    name='OpenCOOD',
+    name='lr-v2x',
     version=__version__,
     packages=find_packages(),
-    license='Academic Software License: © 2021 UCLA Mobility Lab (“Institution”)',
-    author='Seth Z. Zhao',
-    author_email='sethzhao506@g.ucla.edu',
-    description='An open-source pytorch multi-agent system for autonomous driving '
-                'cooperative perception',
-    long_description=open("README.md").read(),
+    license='Mixed; see THIRD_PARTY_NOTICES.md',
+    author='Kang Yang, Tianci Bu, Peng Wang, Deying Li, Yongcai Wang',
+    author_email='ycw@ruc.edu.cn',
+    description='Loss-resilient collaborative LiDAR perception under low-bandwidth communication',
+    long_description=open("README.md", encoding='utf-8').read(),
+    long_description_content_type='text/markdown',
     install_requires=[],
 )

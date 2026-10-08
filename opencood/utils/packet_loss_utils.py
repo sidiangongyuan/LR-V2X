@@ -38,6 +38,77 @@ def _compose_seed(seed_base: int, sample_idx: int, agent_idx: int) -> int:
     return int(seed_base) + int(sample_idx) * 100_003 + int(agent_idx) * 1_000_003
 
 
+def contiguous_numeric_sequence_ends(
+    frame_ids: Sequence[Union[int, str]],
+) -> List[int]:
+    """Return cumulative ends of contiguous numeric frame-ID runs."""
+    if not frame_ids:
+        return []
+
+    numeric_ids = [int(frame_id) for frame_id in frame_ids]
+    sequence_ends = []
+    for index in range(1, len(numeric_ids)):
+        if numeric_ids[index] != numeric_ids[index - 1] + 1:
+            sequence_ends.append(index)
+    sequence_ends.append(len(numeric_ids))
+    return sequence_ends
+
+
+def grouped_sequence_ends(sequence_ids: Sequence[Union[int, str]]) -> List[int]:
+    """Return cumulative ends for adjacent samples sharing one sequence ID."""
+    if not sequence_ids:
+        return []
+
+    normalized_ids = [str(sequence_id) for sequence_id in sequence_ids]
+    sequence_ends = []
+    for index in range(1, len(normalized_ids)):
+        if normalized_ids[index] != normalized_ids[index - 1]:
+            sequence_ends.append(index)
+    sequence_ends.append(len(normalized_ids))
+    return sequence_ends
+
+
+def encode_temporal_sample_index(
+    dataset_index: int,
+    sequence_end_indices: Optional[Sequence[int]],
+    temporal_block_len: int,
+) -> int:
+    """Encode a sequence-local temporal block for the existing mask API."""
+    block_len = int(temporal_block_len)
+    if block_len < 1:
+        raise ValueError(f"temporal_block_len must be positive, got {block_len}")
+    index = int(dataset_index)
+    if not sequence_end_indices:
+        return index
+
+    sequence_idx = 0
+    sequence_start = 0
+    for sequence_end in sequence_end_indices:
+        if index < int(sequence_end):
+            break
+        sequence_start = int(sequence_end)
+        sequence_idx += 1
+    local_block_idx = (index - sequence_start) // block_len
+    composite_block_idx = sequence_idx * 1_000_003 + local_block_idx
+    return composite_block_idx * block_len
+
+
+def encode_packet_loss_sample_index(
+    dataset_index: int,
+    mode: str,
+    sequence_end_indices: Optional[Sequence[int]],
+    temporal_block_len: int,
+) -> int:
+    """Return a deterministic per-sample index for the selected loss process."""
+    if mode.lower() == "temporal_block":
+        return encode_temporal_sample_index(
+            dataset_index,
+            sequence_end_indices,
+            temporal_block_len,
+        )
+    return int(dataset_index)
+
+
 def _sample_uniform(
     shape: Tuple[int, ...],
     device: torch.device,
@@ -58,6 +129,7 @@ def build_spatial_packet_loss_mask(
     dtype: torch.dtype,
     mode: str = "bernoulli",
     burst_coarse_shape: Tuple[int, int] = (8, 16),
+    temporal_block_len: int = 1,
     sample_indices: Optional[Union[int, Sequence[int], torch.Tensor]] = None,
     seed_base: Optional[int] = None,
 ) -> torch.Tensor:
@@ -80,8 +152,14 @@ def build_spatial_packet_loss_mask(
         return mask
 
     normalized_mode = mode.lower()
-    if normalized_mode not in {"bernoulli", "burst"}:
+    if normalized_mode not in {"bernoulli", "burst", "temporal_block"}:
         raise ValueError(f"Unsupported packet loss mode: {mode}")
+    if int(temporal_block_len) < 1:
+        raise ValueError(
+            f"temporal_block_len must be positive, got {temporal_block_len}"
+        )
+    if normalized_mode == "temporal_block" and seed_base is None:
+        raise ValueError("temporal_block mode requires seed_base for reproducibility")
 
     coarse_h = max(1, min(int(burst_coarse_shape[0]), height))
     coarse_w = max(1, min(int(burst_coarse_shape[1]), width))
@@ -100,9 +178,16 @@ def build_spatial_packet_loss_mask(
 
             seed = None
             if seed_base is not None:
-                seed = _compose_seed(int(seed_base), sample_idx, local_agent_idx)
+                seed_sample_idx = sample_idx
+                if normalized_mode == "temporal_block":
+                    seed_sample_idx = sample_idx // int(temporal_block_len)
+                seed = _compose_seed(
+                    int(seed_base),
+                    seed_sample_idx,
+                    local_agent_idx,
+                )
 
-            if normalized_mode == "bernoulli":
+            if normalized_mode in {"bernoulli", "temporal_block"}:
                 random_map = _sample_uniform((1, 1, height, width), device=device, seed=seed)
                 agent_mask = (random_map < keep_ratio).to(dtype=dtype)
             else:

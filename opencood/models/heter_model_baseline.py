@@ -18,13 +18,37 @@ from opencood.models.sub_modules.feature_alignnet import AlignNet
 from opencood.models.sub_modules.base_bev_backbone import BaseBEVBackbone
 from opencood.models.sub_modules.downsample_conv import DownsampleConv
 from opencood.models.sub_modules.naive_compress import NaiveCompressor
-from opencood.models.fuse_modules.fusion_in_one import MaxFusion, AttFusion, DiscoFusion, V2VNetFusion, V2XViTFusion, CoBEVT, Where2commFusion, Who2comFusion
+from opencood.models.fuse_modules.fusion_in_one import MaxFusion, AttFusion, V2XViTFusion, CoBEVT
 from opencood.models.fuse_modules.f_cooper_fuse import SpatialFusion
 from opencood.utils.transformation_utils import normalize_pairwise_tfm
 from opencood.utils.model_utils import check_trainable_module, fix_bn, unfix_bn
 from opencood.utils.packet_loss_utils import build_spatial_packet_loss_mask
 import importlib
 import torchvision
+
+
+def _dense_communication_stats(
+    transmitted_feature: torch.Tensor,
+    record_len: torch.Tensor,
+) -> dict:
+    """Return pre-loss payload accounting for dense collaborator messages."""
+    batch_record_len = [int(value) for value in record_len.view(-1).tolist()]
+    num_collaborators = sum(max(num_agents - 1, 0) for num_agents in batch_record_len)
+    values_per_message = int(np.prod(transmitted_feature.shape[1:]))
+    payload_per_collaborator = values_per_message * transmitted_feature.element_size()
+    scene_payloads = [
+        max(num_agents - 1, 0) * payload_per_collaborator
+        for num_agents in batch_record_len
+    ]
+    return {
+        'comm_rate': 1.0 if num_collaborators else 0.0,
+        'comm_payload_bytes': float(
+            payload_per_collaborator if num_collaborators else 0
+        ),
+        'num_collaborators': num_collaborators,
+        'scene_payload_bytes': scene_payloads,
+    }
+
 
 class HeterModelBaseline(nn.Module):
     def __init__(self, args):
@@ -102,18 +126,10 @@ class HeterModelBaseline(nn.Module):
             self.fusion_net = SpatialFusion()
         if args['fusion_method'] == "att":
             self.fusion_net = AttFusion(args['att']['feat_dim'])
-        if args['fusion_method'] == "disconet":
-            self.fusion_net = DiscoFusion(args['disconet']['feat_dim'])
-        if args['fusion_method'] == "v2vnet":
-            self.fusion_net = V2VNetFusion(args['v2vnet'])
         if args['fusion_method'] == 'v2xvit':
             self.fusion_net = V2XViTFusion(args['v2xvit'])
         if args['fusion_method'] == 'cobevt':
             self.fusion_net = CoBEVT(args['cobevt'])
-        if args['fusion_method'] == 'where2comm':
-            self.fusion_net = Where2commFusion(args['where2comm'])
-        if args['fusion_method'] == 'who2com':
-            self.fusion_net = Who2comFusion(args['who2com'])
 
 
         """
@@ -139,7 +155,9 @@ class HeterModelBaseline(nn.Module):
         self.packet_loss_mode = args.get('packet_loss_mode', 'bernoulli')
         self.burst_coarse_h = int(args.get('burst_coarse_h', 8))
         self.burst_coarse_w = int(args.get('burst_coarse_w', 16))
+        self.temporal_block_len = int(args.get('temporal_block_len', 1))
         self.packet_loss_seed_base = args.get('packet_loss_seed_base', None)
+        self._apply_packet_loss_in_encoder = True
 
         comm_bottleneck_args = args.get('comm_bottleneck', {})
         self.comm_bottleneck_enabled = bool(comm_bottleneck_args.get('enabled', False))
@@ -240,6 +258,10 @@ class HeterModelBaseline(nn.Module):
             size=(comm_h, comm_w),
             mode=self.comm_bottleneck_downsample_mode,
         )
+        self.last_communication_stats = _dense_communication_stats(
+            transmitted_feature,
+            record_len,
+        )
 
         if self.compression_ratio < 1.0:
             comm_mask = build_spatial_packet_loss_mask(
@@ -250,6 +272,7 @@ class HeterModelBaseline(nn.Module):
                 dtype=transmitted_feature.dtype,
                 mode=self.packet_loss_mode,
                 burst_coarse_shape=(self.burst_coarse_h, self.burst_coarse_w),
+                temporal_block_len=self.temporal_block_len,
                 sample_indices=data_dict.get('sample_idx'),
                 seed_base=self.packet_loss_seed_base,
             )
@@ -273,13 +296,9 @@ class HeterModelBaseline(nn.Module):
 
         return restored_feature
 
-    def forward(self, data_dict):
-        output_dict = {}
-        agent_modality_list = data_dict['agent_modality_list'] 
-        affine_matrix = normalize_pairwise_tfm(data_dict['pairwise_t_matrix'], self.H, self.W, self.fake_voxel_size)
-        record_len = data_dict['record_len'] 
-        # print(agent_modality_list)
-
+    def _encode_bev_features(self, data_dict, output_dict):
+        agent_modality_list = data_dict['agent_modality_list']
+        record_len = data_dict['record_len']
         modality_count_dict = Counter(agent_modality_list)
         modality_feature_dict = {}
 
@@ -332,7 +351,7 @@ class HeterModelBaseline(nn.Module):
                 record_len,
                 data_dict,
             )
-        elif self.compression_ratio < 1.0:
+        elif self._apply_packet_loss_in_encoder and self.compression_ratio < 1.0:
             _, _, H, W = heter_feature_2d.shape
             mask = build_spatial_packet_loss_mask(
                 record_len=record_len,
@@ -342,6 +361,7 @@ class HeterModelBaseline(nn.Module):
                 dtype=heter_feature_2d.dtype,
                 mode=self.packet_loss_mode,
                 burst_coarse_shape=(self.burst_coarse_h, self.burst_coarse_w),
+                temporal_block_len=self.temporal_block_len,
                 sample_indices=data_dict.get('sample_idx'),
                 seed_base=self.packet_loss_seed_base,
             )
@@ -349,6 +369,23 @@ class HeterModelBaseline(nn.Module):
         
         if self.compress:
             heter_feature_2d = self.compressor(heter_feature_2d)
+
+        if not self.comm_bottleneck_enabled:
+            self.last_communication_stats = _dense_communication_stats(
+                heter_feature_2d,
+                record_len,
+            )
+
+        self._bev_features = heter_feature_2d
+        return heter_feature_2d
+
+    def forward(self, data_dict):
+        output_dict = {}
+        affine_matrix = normalize_pairwise_tfm(
+            data_dict['pairwise_t_matrix'], self.H, self.W, self.fake_voxel_size
+        )
+        record_len = data_dict['record_len']
+        heter_feature_2d = self._encode_bev_features(data_dict, output_dict)
 
         """
         Single supervision
@@ -386,12 +423,10 @@ class HeterModelBaseline(nn.Module):
 
         output_dict.update({'cls_preds': cls_preds,
                             'reg_preds': reg_preds,
-                            'dir_preds': dir_preds})
+                            'dir_preds': dir_preds,
+                            'fused_feature': fused_feature})
         
         
-        output_dict.update({'preds_tensor': torch.cat([cls_preds, reg_preds, dir_preds], dim=1)})
-
-
         output_dict.update({'preds_tensor': torch.cat([cls_preds, reg_preds, dir_preds], dim=1)})
 
         return output_dict

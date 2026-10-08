@@ -1,14 +1,14 @@
 """
-DiffV2X with Pyramid Fusion (Multi-Class Detection)
+LR-V2X with pyramid fusion for single-class DAIR-V2X detection.
 
 Integrates:
 - Pyramid fusion from heter_pyramid_collab_mc
 - Diffusion module (DiT) for feature reconstruction
-- Multi-class detection heads
+- Single-class detection heads
 
 Training stages:
 - Stage 2: Train diffusion only (freeze pyramid fusion)
-- Stage 3: End-to-end fine-tuning (train all)
+- Stage 3: Fine-tune reconstruction, fusion, and heads with a frozen sensor backbone
 """
 
 import os
@@ -305,6 +305,12 @@ class DiffV2XPyramid(nn.Module):
             self.burst_coarse_w = int(
                 diffusion_args.get('burst_coarse_w', args.get('burst_coarse_w', 16))
             )
+            self.temporal_block_len = int(
+                diffusion_args.get(
+                    'temporal_block_len',
+                    args.get('temporal_block_len', 1),
+                )
+            )
             self.packet_loss_seed_base = diffusion_args.get(
                 'packet_loss_seed_base',
                 args.get('packet_loss_seed_base', None),
@@ -322,6 +328,8 @@ class DiffV2XPyramid(nn.Module):
             print(f"  - Packet loss mode: {self.packet_loss_mode}")
             if self.packet_loss_mode == 'burst':
                 print(f"  - Burst coarse shape: ({self.burst_coarse_h}, {self.burst_coarse_w})")
+            if self.packet_loss_mode == 'temporal_block':
+                print(f"  - Temporal block length: {self.temporal_block_len}")
             if self.packet_loss_seed_base is not None:
                 print(f"  - Packet loss seed base: {self.packet_loss_seed_base}")
 
@@ -459,6 +467,7 @@ class DiffV2XPyramid(nn.Module):
                     dtype=agent_latents.dtype,
                     mode=self.packet_loss_mode,
                     burst_coarse_shape=(self.burst_coarse_h, self.burst_coarse_w),
+                    temporal_block_len=self.temporal_block_len,
                     sample_indices=data_dict.get('sample_idx'),
                     seed_base=self.packet_loss_seed_base,
                 )

@@ -25,11 +25,14 @@ def backup_script(full_path, folders_to_save=["models", "data_utils", "utils", "
         source_folder = os.path.join(current_path, f'../{folder_name}')
         shutil.copytree(source_folder, ttarget_folder)
 
-def check_missing_key(model_state_dict, ckpt_state_dict):
+def check_missing_key(model_state_dict, ckpt_state_dict, optional_prefixes=()):
     checkpoint_keys = set(ckpt_state_dict.keys())
     model_keys = set(model_state_dict.keys())
 
-    missing_keys = model_keys - checkpoint_keys
+    missing_keys = {
+        key for key in model_keys - checkpoint_keys
+        if not any(key.startswith(prefix) for prefix in optional_prefixes)
+    }
     extra_keys = checkpoint_keys - model_keys
 
     missing_key_modules = set([keyname.split('.')[0] for keyname in missing_keys])
@@ -51,7 +54,32 @@ def check_missing_key(model_state_dict, ckpt_state_dict):
     print("--------------------------------")
 
 
-def load_saved_model(saved_path, model):
+def _load_checkpoint_state(model, loaded_state_dict, strict_trainable):
+    optional_prefixes = tuple(
+        getattr(model, 'checkpoint_optional_prefixes', ())
+    )
+    check_missing_key(
+        model.state_dict(),
+        loaded_state_dict,
+        optional_prefixes=optional_prefixes,
+    )
+    if strict_trainable:
+        trainable_keys = {
+            name for name, parameter in model.named_parameters()
+            if parameter.requires_grad
+        }
+        missing_trainable = sorted(trainable_keys - set(loaded_state_dict))
+        if missing_trainable:
+            preview = '\n'.join(missing_trainable[:20])
+            raise RuntimeError(
+                'Checkpoint is missing trainable model parameters. '
+                'This usually indicates a model/config mismatch.\n'
+                f'{preview}'
+            )
+    model.load_state_dict(loaded_state_dict, strict=False)
+
+
+def load_saved_model(saved_path, model, strict_trainable=None):
     """
     Load saved model if exiseted
 
@@ -68,6 +96,10 @@ def load_saved_model(saved_path, model):
         The model instance loaded pretrained params.
     """
     assert os.path.exists(saved_path), '{} not found'.format(saved_path)
+    if strict_trainable is None:
+        strict_trainable = bool(
+            getattr(model, 'strict_checkpoint_trainable', False)
+        )
 
     def findLastCheckpoint(save_dir):
         file_list = glob.glob(os.path.join(save_dir, '*epoch*.pth'))
@@ -87,8 +119,7 @@ def load_saved_model(saved_path, model):
         print("resuming best validation model at epoch %d" % \
                 eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")))
         loaded_state_dict = torch.load(file_list[0] , map_location='cpu')
-        check_missing_key(model.state_dict(), loaded_state_dict)
-        model.load_state_dict(loaded_state_dict, strict=False)
+        _load_checkpoint_state(model, loaded_state_dict, strict_trainable)
         return eval(file_list[0].split("/")[-1].rstrip(".pth").lstrip("net_epoch_bestval_at")), model
 
     initial_epoch = findLastCheckpoint(saved_path)
@@ -96,8 +127,7 @@ def load_saved_model(saved_path, model):
         print('resuming by loading epoch %d' % initial_epoch)
         loaded_state_dict = torch.load(os.path.join(saved_path,
                          'net_epoch%d.pth' % initial_epoch), map_location='cpu')
-        check_missing_key(model.state_dict(), loaded_state_dict)
-        model.load_state_dict(loaded_state_dict, strict=False)
+        _load_checkpoint_state(model, loaded_state_dict, strict_trainable)
 
     return initial_epoch, model
 
@@ -119,7 +149,7 @@ def setup_train(hypes):
         or os.environ.get('OPENCOOD_RESULT_DIR')
     )
     if not output_root:
-        output_root = "/mnt/sdb/public/data/yk/result/loom-v2x"
+        output_root = "logs"
 
     model_name = hypes['name']
     current_time = datetime.now()

@@ -11,7 +11,6 @@ from opencood.models.sub_modules.resblock import ResNetModified, Bottleneck, Bas
 from opencood.models.fuse_modules.fusion_in_one import regroup
 from opencood.models.sub_modules.torch_transformation_utils import \
     warp_affine_simple
-from opencood.visualization.debug_plot import plot_feature
 
 
 def weighted_fuse(x, score, record_len, affine_matrix, align_corners):

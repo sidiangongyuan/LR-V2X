@@ -18,6 +18,7 @@ from opencood.utils.model_utils import check_trainable_module, fix_bn, unfix_bn
 from opencood.models.heter_pyramid_collab_mc import HeterPyramidCollabMC
 from opencood.models.sub_modules.codebook import UMGMQuantizer #import codebook module
 from opencood.utils.transformation_utils import normalize_pairwise_tfm
+from opencood.utils.packet_loss_utils import build_spatial_packet_loss_mask
 import importlib
 import torchvision
 
@@ -34,6 +35,12 @@ class HeterPyramidCollabCodebookMC(HeterPyramidCollabMC):
             self.seg_num = 2
             self.dict_size = [256] * 3  # default to 256 for all stages
             self.compression_ratio = 1.0  # default: no packet loss
+        channel_args = args.get('codebook', args)
+        self.packet_loss_mode = channel_args.get('packet_loss_mode', 'bernoulli')
+        self.burst_coarse_h = int(channel_args.get('burst_coarse_h', 8))
+        self.burst_coarse_w = int(channel_args.get('burst_coarse_w', 16))
+        self.temporal_block_len = int(channel_args.get('temporal_block_len', 1))
+        self.packet_loss_seed_base = channel_args.get('packet_loss_seed_base')
      
         self.p_rate = 0.0  # typically 0.0 - don't inject noise
 
@@ -160,19 +167,19 @@ class HeterPyramidCollabCodebookMC(HeterPyramidCollabMC):
         quantized = quantized.view(N, H, W, C).permute(0, 3, 1, 2).contiguous()
         
         if hasattr(self, 'compression_ratio') and self.compression_ratio < 1.0:
-            # Spatial mask: keep compression_ratio of spatial locations, drop the rest
-            # Each spatial location's all channels are dropped together (matching codebook indices transmission)
-            N, _, H, W = quantized.shape
-            spatial_mask = (torch.rand(N, 1, H, W, device=quantized.device) < self.compression_ratio).to(
-                quantized.dtype
+            spatial_mask = build_spatial_packet_loss_mask(
+                record_len=record_len,
+                spatial_size=(H, W),
+                keep_ratio=self.compression_ratio,
+                device=quantized.device,
+                dtype=quantized.dtype,
+                mode=self.packet_loss_mode,
+                burst_coarse_shape=(self.burst_coarse_h, self.burst_coarse_w),
+                temporal_block_len=self.temporal_block_len,
+                sample_indices=data_dict.get('sample_idx'),
+                seed_base=self.packet_loss_seed_base,
             )
-            # Ego is local; do not simulate packet loss on ego features.
-            start_idx = 0
-            for num_agents in record_len:
-                num_agents_int = int(num_agents.item()) if isinstance(num_agents, torch.Tensor) else int(num_agents)
-                spatial_mask[start_idx] = 1.0
-                start_idx += num_agents_int
-            quantized = quantized * spatial_mask  # broadcast [N, 1, H, W] to [N, C, H, W]
+            quantized = quantized * spatial_mask
 
         heter_feature_2d = quantized
         output_dict.update({'codebook_loss': codebook_loss})

@@ -129,6 +129,7 @@ class HeterPyramidCollab(nn.Module):
         self.packet_loss_mode = args.get('packet_loss_mode', 'bernoulli')
         self.burst_coarse_h = int(args.get('burst_coarse_h', 8))
         self.burst_coarse_w = int(args.get('burst_coarse_w', 16))
+        self.temporal_block_len = int(args.get('temporal_block_len', 1))
         self.packet_loss_seed_base = args.get('packet_loss_seed_base', None)
 
         comm_bottleneck_args = args.get('comm_bottleneck', {})
@@ -222,6 +223,7 @@ class HeterPyramidCollab(nn.Module):
                 dtype=transmitted_feature.dtype,
                 mode=self.packet_loss_mode,
                 burst_coarse_shape=(self.burst_coarse_h, self.burst_coarse_w),
+                temporal_block_len=self.temporal_block_len,
                 sample_indices=data_dict.get('sample_idx'),
                 seed_base=self.packet_loss_seed_base,
             )
@@ -332,6 +334,7 @@ class HeterPyramidCollab(nn.Module):
                 dtype=heter_feature_2d.dtype,
                 mode=self.packet_loss_mode,
                 burst_coarse_shape=(self.burst_coarse_h, self.burst_coarse_w),
+                temporal_block_len=self.temporal_block_len,
                 sample_indices=data_dict.get('sample_idx'),
                 seed_base=self.packet_loss_seed_base,
             )

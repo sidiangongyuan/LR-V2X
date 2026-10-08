@@ -17,10 +17,11 @@ from opencood.models.sub_modules.feature_alignnet import AlignNet
 from opencood.models.sub_modules.base_bev_backbone import BaseBEVBackbone
 from opencood.models.sub_modules.downsample_conv import DownsampleConv
 from opencood.models.sub_modules.naive_compress import NaiveCompressor
-from opencood.models.fuse_modules.fusion_in_one import MaxFusion, AttFusion, DiscoFusion, V2VNetFusion, V2XViTFusion, CoBEVT, Where2commFusion, Who2comFusion
+from opencood.models.fuse_modules.fusion_in_one import MaxFusion, AttFusion, V2XViTFusion, CoBEVT
 from opencood.models.fuse_modules.f_cooper_fuse import SpatialFusion
 from opencood.utils.transformation_utils import normalize_pairwise_tfm
 from opencood.utils.model_utils import check_trainable_module, fix_bn, unfix_bn
+from opencood.utils.packet_loss_utils import build_spatial_packet_loss_mask
 import importlib
 import torchvision
 
@@ -100,18 +101,10 @@ class HeterModelBaselineMC(nn.Module):
             self.fusion_net = SpatialFusion()
         if args['fusion_method'] == "att":
             self.fusion_net = AttFusion(args['att']['feat_dim'])
-        if args['fusion_method'] == "disconet":
-            self.fusion_net = DiscoFusion(args['disconet']['feat_dim'])
-        if args['fusion_method'] == "v2vnet":
-            self.fusion_net = V2VNetFusion(args['v2vnet'])
         if args['fusion_method'] == 'v2xvit':
             self.fusion_net = V2XViTFusion(args['v2xvit'])
         if args['fusion_method'] == 'cobevt':
             self.fusion_net = CoBEVT(args['cobevt'])
-        if args['fusion_method'] == 'where2comm':
-            self.fusion_net = Where2commFusion(args['where2comm'])
-        if args['fusion_method'] == 'who2com':
-            self.fusion_net = Who2comFusion(args['who2com'])
 
         """
         Shrink header
@@ -141,6 +134,12 @@ class HeterModelBaselineMC(nn.Module):
 
 
         self.compression_ratio = args.get('compression_ratio', 1.0)
+        self.packet_loss_mode = args.get('packet_loss_mode', 'bernoulli')
+        self.burst_coarse_h = int(args.get('burst_coarse_h', 8))
+        self.burst_coarse_w = int(args.get('burst_coarse_w', 16))
+        self.temporal_block_len = int(args.get('temporal_block_len', 1))
+        self.packet_loss_seed_base = args.get('packet_loss_seed_base', None)
+        self._apply_packet_loss_in_encoder = True
 
         # check again which module is not fixed.
         check_trainable_module(self)
@@ -156,13 +155,9 @@ class HeterModelBaselineMC(nn.Module):
             for p in self.compressor.parameters():
                 p.requires_grad_(True)
 
-    def forward(self, data_dict):
-        output_dict = {}
-        agent_modality_list = data_dict['agent_modality_list'] 
-        affine_matrix = normalize_pairwise_tfm(data_dict['pairwise_t_matrix'], self.H, self.W, self.fake_voxel_size)
-        record_len = data_dict['record_len'] 
-        # print(agent_modality_list)
-
+    def _encode_bev_features(self, data_dict, output_dict):
+        agent_modality_list = data_dict['agent_modality_list']
+        record_len = data_dict['record_len']
         modality_count_dict = Counter(agent_modality_list)
         modality_feature_dict = {}
 
@@ -205,31 +200,35 @@ class HeterModelBaselineMC(nn.Module):
 
         heter_feature_2d = torch.stack(heter_feature_2d_list)
 
-        # Apply compression (simulate communication constraint)
-        if self.compression_ratio < 1.0:
-            # Spatial-level mask: entire spatial location is either received or lost
-            # Shape: [num_agents, 1, H, W] instead of [num_agents, C, H, W]
-            # This simulates packet loss where a packet contains all channels at one location
-            N, _, H, W = heter_feature_2d.shape
-            mask = (torch.rand(N, 1, H, W, device=heter_feature_2d.device) < self.compression_ratio).to(
-                heter_feature_2d.dtype
+        if self._apply_packet_loss_in_encoder and self.compression_ratio < 1.0:
+            _, _, height, width = heter_feature_2d.shape
+            mask = build_spatial_packet_loss_mask(
+                record_len=record_len,
+                spatial_size=(height, width),
+                keep_ratio=self.compression_ratio,
+                device=heter_feature_2d.device,
+                dtype=heter_feature_2d.dtype,
+                mode=self.packet_loss_mode,
+                burst_coarse_shape=(self.burst_coarse_h, self.burst_coarse_w),
+                temporal_block_len=self.temporal_block_len,
+                sample_indices=data_dict.get('sample_idx'),
+                seed_base=self.packet_loss_seed_base,
             )
-            # Ego is local; do not simulate packet loss on ego features.
-            start_idx = 0
-            for num_agents in record_len:
-                num_agents_int = int(num_agents.item()) if isinstance(num_agents, torch.Tensor) else int(num_agents)
-                mask[start_idx] = 1.0
-                start_idx += num_agents_int
             heter_feature_2d = heter_feature_2d * mask
-        else:
-            heter_feature_2d = heter_feature_2d
-
 
         if self.compress:
             heter_feature_2d = self.compressor(heter_feature_2d)
 
-        # Cache BEV features for diffusion module (if used in wrapper)
         self._bev_features = heter_feature_2d
+        return heter_feature_2d
+
+    def forward(self, data_dict):
+        output_dict = {}
+        affine_matrix = normalize_pairwise_tfm(
+            data_dict['pairwise_t_matrix'], self.H, self.W, self.fake_voxel_size
+        )
+        record_len = data_dict['record_len']
+        heter_feature_2d = self._encode_bev_features(data_dict, output_dict)
 
         """
         Single supervision

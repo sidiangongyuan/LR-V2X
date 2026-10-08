@@ -7,6 +7,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+opencood/utils/box_overlaps.c
 .eggs/
 
 # Test & tooling caches
@@ -62,7 +63,12 @@ opencood/hypes_yaml/**/DiffV2X_Stages/*zero_prior*.yaml
 scripts/
 pcd_vis.py
 test_different_timesteps.py
-opencood/visualization/
+# Dataset and checkpoint storage
+data/
+*.pth
+*.pt
+*.ckpt
+tmp/
 opencood/tools/profiler/
 opencood/tools/build_trt*.py
 opencood/tools/onnx_export_utils.py

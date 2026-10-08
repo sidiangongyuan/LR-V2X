@@ -1,6 +1,7 @@
 from datetime import datetime
 import argparse
 import os
+import yaml
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -100,6 +101,8 @@ def main():
     else:
         model_dir = opt.model_dir
     os.makedirs(model_dir, exist_ok=True)
+    with open(os.path.join(model_dir, 'config.yaml'), 'w') as stream:
+        yaml.dump(hypes, stream)
     print(f"Model directory is set to: {model_dir}")
 
     writer = SummaryWriter(model_dir)

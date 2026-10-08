@@ -1,7 +1,8 @@
 import argparse
 import os
-import statistics
 import glob
+import random
+import numpy as np
 import torch
 from torch.utils.data import DataLoader, DistributedSampler
 from tensorboardX import SummaryWriter
@@ -14,7 +15,6 @@ from icecream import ic
 import tqdm
 
 # CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 --use_env opencood/tools/train_ddp.py --hypes_yaml ${CONFIG_FILE} [--model_dir  ${CHECKPOINT_FOLDER}
-# CUDA_VISIBLE_DEVICES=2,3 python -m torch.distributed.launch --nproc_per_node=2 --use_env opencood/tools/train_ddp.py --hypes_yaml /mnt/sdb/public/data/yk/projects/QuantV2X/opencood/hypes_yaml/v2x_real/LiDAROnly/lidar_gaussian_fusion.yaml
 def train_parser():
     parser = argparse.ArgumentParser(description="synthetic data generation")
     parser.add_argument("--hypes_yaml", "-y", type=str, required=True,
@@ -40,6 +40,12 @@ def main():
     opt = train_parser()
     hypes = yaml_utils.load_yaml(opt.hypes_yaml, opt)
     multi_gpu_utils.init_distributed_mode(opt)
+    if 'seed' in hypes.get('train_params', {}):
+        seed = int(hypes['train_params']['seed'])
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
     print('Dataset Building')
     opencood_train_dataset = build_dataset(hypes, visualize=False, train=True)
@@ -217,6 +223,7 @@ def main():
     import sys
     import datetime
     log_file = None
+    original_stdout = sys.stdout
     if opt.rank == 0:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         log_filename = os.path.join(saved_path, f'train_{timestamp}.log')
@@ -234,7 +241,7 @@ def main():
                 for f in self.files:
                     f.flush()
 
-        sys.stdout = TeeOutput(sys.stdout, log_file)
+        sys.stdout = TeeOutput(original_stdout, log_file)
         print(f"[Logging] Training log will be saved to: {log_filename}")
 
     # half precision training
@@ -293,13 +300,14 @@ def main():
 
 
         # torch.cuda.empty_cache() # it will destroy memory buffer
-        if epoch % hypes['train_params']['save_freq'] == 0:
+        if epoch % hypes['train_params']['save_freq'] == 0 and opt.rank == 0:
             torch.save(model_without_ddp.state_dict(),
                        os.path.join(saved_path,
                                     'net_epoch%d.pth' % (epoch + 1)))
             
         if epoch % hypes['train_params']['eval_freq'] == 0:
-            valid_ave_loss = []
+            valid_loss_sum = 0.0
+            valid_sample_count = 0
 
             with torch.no_grad():
                 for i, batch_data in enumerate(val_loader):
@@ -327,22 +335,47 @@ def main():
                                                batch_data['ego']['label_dict'])
                         val_loss = final_loss.item()
 
-                    valid_ave_loss.append(val_loss)
+                    batch_size = int(batch_data['ego']['record_len'].shape[0])
+                    valid_loss_sum += val_loss * batch_size
+                    valid_sample_count += batch_size
 
-            valid_ave_loss = statistics.mean(valid_ave_loss)
-            print('At epoch %d, the validation loss is %f' % (epoch,
-                                                              valid_ave_loss))
-            writer.add_scalar('Validate_Loss', valid_ave_loss, epoch)
+            if valid_sample_count == 0:
+                raise RuntimeError('Validation produced no finite batches.')
+
+            loss_stats = torch.tensor(
+                [valid_loss_sum, valid_sample_count],
+                dtype=torch.float64,
+                device=device,
+            )
+            if opt.distributed:
+                torch.distributed.all_reduce(
+                    loss_stats,
+                    op=torch.distributed.ReduceOp.SUM,
+                )
+            valid_ave_loss = (loss_stats[0] / loss_stats[1]).item()
+            if opt.rank == 0:
+                print('At epoch %d, the validation loss is %f' % (
+                    epoch,
+                    valid_ave_loss,
+                ))
+                writer.add_scalar('Validate_Loss', valid_ave_loss, epoch)
 
             # lowest val loss
             if valid_ave_loss < lowest_val_loss:
                 lowest_val_loss = valid_ave_loss
-                torch.save(model_without_ddp.state_dict(),
-                       os.path.join(saved_path,
-                                    'net_epoch_bestval_at%d.pth' % (epoch + 1)))
-                if lowest_val_epoch != -1 and os.path.exists(os.path.join(saved_path,
-                                    'net_epoch_bestval_at%d.pth' % (lowest_val_epoch))):
-                    if opt.rank == 0:
+                if opt.rank == 0:
+                    torch.save(
+                        model_without_ddp.state_dict(),
+                        os.path.join(
+                            saved_path,
+                            'net_epoch_bestval_at%d.pth' % (epoch + 1),
+                        ),
+                    )
+                    previous_best = os.path.join(
+                        saved_path,
+                        'net_epoch_bestval_at%d.pth' % lowest_val_epoch,
+                    )
+                    if lowest_val_epoch != -1 and os.path.exists(previous_best):
                         os.remove(os.path.join(saved_path,
                                         'net_epoch_bestval_at%d.pth' % (lowest_val_epoch)))
                 lowest_val_epoch = epoch + 1
@@ -355,6 +388,7 @@ def main():
 
     # Close log file
     if log_file is not None:
+        sys.stdout = original_stdout
         log_file.close()
 
     if opt.rank == 0:
@@ -364,7 +398,6 @@ def main():
         bestval_model_list = glob.glob(os.path.join(saved_path, "net_epoch_bestval_at*"))
         
         if len(bestval_model_list) > 1:
-            import numpy as np
             bestval_model_epoch_list = [eval(x.split("/")[-1].lstrip("net_epoch_bestval_at").rstrip(".pth")) for x in bestval_model_list]
             ascending_idx = np.argsort(bestval_model_epoch_list)
             for idx in ascending_idx:

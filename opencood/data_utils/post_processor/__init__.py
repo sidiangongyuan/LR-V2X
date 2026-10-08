@@ -4,18 +4,10 @@
 
 from opencood.data_utils.post_processor.voxel_postprocessor import VoxelPostprocessor
 from opencood.data_utils.post_processor.voxel_postprocessor_3heads import VoxelPostprocessor3Heads
-from opencood.data_utils.post_processor.bev_postprocessor import BevPostprocessor
-from opencood.data_utils.post_processor.ciassd_postprocessor import CiassdPostprocessor
-from opencood.data_utils.post_processor.fpvrcnn_postprocessor import FpvrcnnPostprocessor
-from opencood.data_utils.post_processor.uncertainty_voxel_postprocessor import UncertaintyVoxelPostprocessor
 
 __all__ = {
     'VoxelPostprocessor': VoxelPostprocessor,
     'VoxelPostprocessor3Heads': VoxelPostprocessor3Heads,
-    'BevPostprocessor': BevPostprocessor,
-    'CiassdPostprocessor': CiassdPostprocessor,
-    'FpvrcnnPostprocessor': FpvrcnnPostprocessor,
-    'UncertaintyVoxelPostprocessor': UncertaintyVoxelPostprocessor,
 }
 
 
