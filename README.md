@@ -86,16 +86,20 @@ Payload is measured per collaborator frame **before loss**.
 | **LR-V2X** | **128 KiB** | **44.87** | **38.60** | **24.18** |
 
 The latent contains `16 × 32 × 64` float32 values: 131,072 bytes (128 KiB),
-a **64× smaller payload** than the dense BEV. The paper labels these binary
-tensor sizes as KB/MB; this README uses KiB/MiB explicitly.
+a **64× smaller payload** than the 8 MiB dense BEV. Both the paper and this
+README report these tensor payloads in KiB/MiB.
 
 <p align="center">
   <img src="assets/sweep.png" alt="Detection accuracy across packet-loss rates on DAIR-V2X and V2XREAL" width="1000">
 </p>
 
 <p align="center">
-  <img src="assets/qual.png" alt="Qualitative collaborative detection comparisons from the paper appendix" width="1000">
+  <img src="assets/qual.png" alt="Figure 6: HEAL, CodeFilling, and LR-V2X detection results under 90% packet loss" width="1000">
 </p>
+
+Detection results under **90% packet loss** (Figure 6 of the paper). Columns
+show HEAL, CodeFilling, and LR-V2X. The top two rows are DAIR-V2X; the bottom
+two are V2XREAL. Red boxes are predictions; green boxes are ground truth.
 
 ## Installation
 
